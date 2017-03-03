@@ -1,0 +1,192 @@
+---
+title: "Marketing Analytics II Data Briefing: Internal v External Expectations v Education Outcomes"
+author: "Davis Townsend"
+date: "February 23, 2017"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+library(knitr)
+knitr::opts_chunk$set(echo = TRUE, message=FALSE, warning=FALSE)
+#wrap text so doesn't run off pdf file
+opts_chunk$set(tidy.opts=list(width.cutoff=60),tidy=TRUE)
+```
+
+## Loading the data from NCES data and syntax files
+
+```{r}
+library(dplyr)
+library(ROCR)
+library(usdm)
+
+# Change working directory
+setwd("C:/Users/Owner/Documents/MSBA/Marketing Analytics II/Data Briefing")
+
+# Load R Data File
+load("HSLS_09_STUDENT_v3_0.rdata")
+
+# Create vector of selected variables
+keepvars <- c(
+   "STU_ID",
+   "SCH_ID",
+   "X1SEX",
+   "X1RACE",
+   "X1PAREDU",
+   "X1SES_U",
+   "X1STUEDEXPCT",
+   "X1PAREDEXPCT",
+   "X3TCOVERAGE",
+   "X3TOUTCOME",
+   "S3CLASSES"
+)
+
+# Create new object containing only selected variables
+HSLS_09_STUDENT_v3_0_170223172353 <- hsls_09_student_v3_0[keepvars]
+
+# Save dataset
+save(HSLS_09_STUDENT_v3_0_170223172353, file="HSLS_09_STUDENT_v3_0_170223172353.rdata")
+
+# Set the working dataset
+attach(HSLS_09_STUDENT_v3_0_170223172353)
+```
+Let's clean the data now:
+```{r}
+#first lets just reassign the missing values in every column as NA
+HSLS_09_STUDENT_v3_0_170223172353$X1SEX[HSLS_09_STUDENT_v3_0_170223172353$X1SEX==-9] <- NA
+HSLS_09_STUDENT_v3_0_170223172353$X1RACE[HSLS_09_STUDENT_v3_0_170223172353$X1RACE==-9] <- NA
+HSLS_09_STUDENT_v3_0_170223172353$X1PAREDU[HSLS_09_STUDENT_v3_0_170223172353$X1PAREDU==-9] <- NA
+HSLS_09_STUDENT_v3_0_170223172353$X1PAREDEXPCT[HSLS_09_STUDENT_v3_0_170223172353$X1PAREDEXPCT==-9] <- NA
+HSLS_09_STUDENT_v3_0_170223172353$X1PAREDEXPCT[HSLS_09_STUDENT_v3_0_170223172353$X1PAREDEXPCT==-8] <- NA
+HSLS_09_STUDENT_v3_0_170223172353$X1STUEDEXPCT[HSLS_09_STUDENT_v3_0_170223172353$X1STUEDEXPCT==-8] <- NA
+HSLS_09_STUDENT_v3_0_170223172353$X3TCOVERAGE[HSLS_09_STUDENT_v3_0_170223172353$X3TCOVERAGE==-8] <- NA
+HSLS_09_STUDENT_v3_0_170223172353$S3CLASSES[HSLS_09_STUDENT_v3_0_170223172353$S3CLASSES==-9] <- NA
+HSLS_09_STUDENT_v3_0_170223172353$S3CLASSES[HSLS_09_STUDENT_v3_0_170223172353$S3CLASSES==3] <- NA
+#drop non-responses?
+HSLS_09_STUDENT_v3_0_170223172353$S3CLASSES[HSLS_09_STUDENT_v3_0_170223172353$S3CLASSES==-8] <- NA
+
+#new dataset with missing rows removes
+newdata <- na.omit(HSLS_09_STUDENT_v3_0_170223172353)
+```
+
+```{r}
+#now lets combine the hispanic columns in the race dataset
+#for expectations make "start degrees" equal to "complete degrees" this may be a big assumption and affect the output
+newdata$X1RACE[newdata$X1RACE==4] <- 5
+
+newdata$X1STUEDEXPCT[newdata$X1STUEDEXPCT==3] <- 4
+newdata$X1STUEDEXPCT[newdata$X1STUEDEXPCT==5] <- 6
+newdata$X1STUEDEXPCT[newdata$X1STUEDEXPCT==7] <- 8
+newdata$X1STUEDEXPCT[newdata$X1STUEDEXPCT==9] <- 10
+
+newdata$X1PAREDEXPCT[newdata$X1PAREDEXPCT==3] <- 4
+newdata$X1PAREDEXPCT[newdata$X1PAREDEXPCT==5] <- 6
+newdata$X1PAREDEXPCT[newdata$X1PAREDEXPCT==7] <- 8
+newdata$X1PAREDEXPCT[newdata$X1PAREDEXPCT==9] <- 10
+
+#run this if want to include non-responses as meaning "no" instead of NA in above cell
+#newdata$S3CLASSES[newdata$S3CLASSES==-8] <- 2
+
+#make non response for parent education = to be 12
+newdata$X1PAREDU[newdata$X1PAREDU==-8] <- 8
+
+```
+
+After cleaning the data we have 15,483 observations left
+
+```{r}
+data <- subset(newdata, select = c(3,4,5,6,7,8,11))
+data$S3CLASSES[data$S3CLASSES==2] <- 0
+
+data$X1RACE <- as.factor(data$X1RACE)
+data$X1PAREDU <-as.factor(data$X1PAREDU)
+data$X1STUEDEXPCT <- as.factor(data$X1STUEDEXPCT)
+data$X1PAREDEXPCT <- as.factor(data$X1PAREDEXPCT)
+data$X1SEX <- as.factor(data$X1SEX)
+
+ #"White is base level"
+data$X1RACE <- relevel(data$X1RACE, ref = 7)
+# "dont know is base level"
+data$X1STUEDEXPCT <- relevel(data$X1STUEDEXPCT, ref=7)
+#"dont know is base level"
+data$X1PAREDEXPCT <- relevel(data$X1PAREDEXPCT, ref=7)
+
+df2 <- data
+#split into training and test sets
+train<-sample_frac(df2, 0.7)
+sid<-as.numeric(rownames(train)) # because rownames() returns character
+test<-df2[-sid,]
+
+model2 <- glm(S3CLASSES~.,family=binomial(link='logit'),data=train)
+summary(model2)
+
+```
+
+
+Let's try and predict if the student will be taking college classes now with our model in hand
+```{r}
+fitted.results <- predict(model2,newdata=test,type='response')
+fitted.results <- ifelse(fitted.results > 0.5,1,0)
+
+misClasificError <- mean(fitted.results != test$S3CLASSES)
+print(paste('Accuracy',1-misClasificError))
+```
+sum(df2$S3CLASSES)
+
+#plotting ROC Curve
+```{r}
+p <- predict(model2, newdata=test, type="response")
+pr <- prediction(p, test$S3CLASSES)
+prf <- performance(pr, measure = "tpr", x.measure = "fpr")
+plot(prf)
+
+auc <- performance(pr, measure = "auc")
+auc <- auc@y.values[[1]]
+auc
+```
+
+```{r}
+library(ROSE)
+#check balance of classes
+prop.table(table(data$S3CLASSES))
+#80% positive class, let's try to balance ths
+```
+
+```{r}
+#over sample til minority class has same as majority
+data_balanced_over <- ovun.sample(S3CLASSES ~ ., data = train, method = "over",N = 24784)$data
+#under sample til majority class is same as minority class
+data_balanced_under <- ovun.sample(S3CLASSES ~ ., data = train, method = "under",N = 3091)$data
+# both methods combined
+data_balanced_both <- ovun.sample(S3CLASSES ~ ., data = train, method = "both", p=0.5, N = 15483)$data
+#use ROSE method
+data.rose <- ROSE(S3CLASSES ~ ., data = train)$data
+
+#going back to logit model
+model_rose <- glm(S3CLASSES~.,family=binomial(link='logit'),data=data_balanced_over)
+model_over <- glm(S3CLASSES~.,family=binomial(link='logit'),data=data_balanced_under)
+model_under <- glm(S3CLASSES~.,family=binomial(link='logit'),data=data_balanced_both)
+model_both <- glm(S3CLASSES~.,family=binomial(link='logit'),data=data.rose)
+#predict GLM models accuracy
+pred.glm.rose <- predict(model_rose, newdata = test)
+pred.glm.over <- predict(model_over, newdata = test)
+pred.glm.under <- predict(model_under, newdata = test)
+pred.glm.both <- predict(model_both, newdata = test)
+
+#check accuracy of each
+roc.curve(test$S3CLASSES, pred.glm.rose)
+
+roc.curve(test$S3CLASSES, pred.glm.over)
+auc_over <- .784
+auc_over <- paste(c("AUC_OverSampled  = "),auc_over,sep="")
+
+legend(0.25,0.3,auc_over,border="white",cex=1.3,box.col = "white")
+
+roc.curve(test$S3CLASSES, pred.glm.under)
+roc.curve(test$S3CLASSES, pred.glm.both)
+
+summary(model_over)
+
+prop.table(table(data$X1RACE))
+
+```
+White people make up ~60% of our sample
